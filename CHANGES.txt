@@ -745,3 +745,25 @@ Release 1.0.0-rc1 2017-12-17
   * Fix MessagePackObject.UnderlyingType reports wrong type for ext types. Part of #269.
     This bug also caused misleading error message for incompatible type conversion.
   * Fix exceptions thrown by MessagePackObject.AsBinary()/AsString() reports internal type name. Part of #269.
+
+Release 1.0.0 2018-6-14
+
+  BUG FIXES
+  * [NonSerialized] attribute does not effect in Mono based platform including Unity.
+  * Fix map keys order emitted by asymmetric (serialization only) serializer are inconsistent across platform.
+  * Fix Unity build does not honor serialization related attributes correctly.
+  * Fix internal inconsitency between serialization related attributes detection and their parameter retrieval.
+
+Release 1.0.1 2018-09-09
+
+  BUG FIXES
+  * Fix conversion from DateTime[Offset] to Timestamp failure for before Unix epoc. #296
+
+Release 1.1
+
+  BUG FIXES
+  * Fix conversion from DateTime[Offset] to Timestamp failure for before Unix epoc. #296 (port from 1.0.x branch)
+
+  NEW FEATURE
+  * Allow programatically ignoring arbitary members via BindingOptions. Thank you @ShrenikOne #282
+  * To prevent accidental Timestamp serialization in existing code, SerializationContext.ConfigureClassic(SerializationCompatibilityLevel) and SerializationContext.CreateClassicContext(SerializationCompatibilityLevel) are added. #296

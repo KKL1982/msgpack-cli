@@ -93,13 +93,13 @@ namespace MsgPack.Serialization
 
 		private static SerializationContext NewSerializationContext()
 		{
-			return NewSerializationContext( PackerCompatibilityOptions.None, DateTimeConversionMethod.Timestamp );
+			return NewSerializationContext( SerializationCompatibilityLevel.Latest );
 		}
 
-		private static SerializationContext NewSerializationContext( PackerCompatibilityOptions compatibilityOptions, DateTimeConversionMethod dateTimeConversionMethod )
+		private static SerializationContext NewSerializationContext( SerializationCompatibilityLevel compatibilityLevel )
 		{
-			var context = new SerializationContext( compatibilityOptions ) { SerializationMethod = SerializationMethod.Map };
-			context.DefaultDateTimeConversionMethod = dateTimeConversionMethod;
+			var context = SerializationContext.CreateClassicContext( compatibilityLevel );
+			context.SerializationMethod = SerializationMethod.Map;
 			context.SerializerOptions.EmitterFlavor = EmitterFlavor.FieldBased;
 #if SILVERLIGHT && !SILVERLIGHT_PRIVILEGED
 			context.SerializerOptions.DisablePrivilegedAccess = true;
@@ -279,10 +279,38 @@ namespace MsgPack.Serialization
 		}
 
 		[Test]
-		public void TestDateTimeNative()
+		public void TestDateTimeLatest()
 		{
 			TestCore(
-				DateTime.Now,
+				DateTime.UtcNow,
+				stream => Timestamp.Decode( Unpacking.UnpackExtendedTypeObject( stream ) ).ToDateTime(),
+				( x, y ) => x.Equals( y ),
+				context =>
+				{
+					context.DefaultDateTimeConversionMethod = DateTimeConversionMethod.Timestamp;
+				}
+			);
+		}
+
+		[Test]
+		public void TestDateTimeOffsetLatest()
+		{
+			TestCore(
+				DateTimeOffset.UtcNow,
+				stream => Timestamp.Decode( Unpacking.UnpackExtendedTypeObject( stream ) ).ToDateTimeOffset(),
+				( x, y ) => x.Equals( y ),
+				context =>
+				{
+					context.DefaultDateTimeConversionMethod = DateTimeConversionMethod.Timestamp;
+				}
+			);
+		}
+
+		[Test]
+		public void TestDateTimeClassic0_9()
+		{
+			TestCore(
+				DateTime.Now, // Use now because Native mode should serialize its kind
 				stream => DateTime.FromBinary( Unpacking.UnpackInt64( stream ) ),
 				( x, y ) => x.Equals( y ),
 				context =>
@@ -293,10 +321,10 @@ namespace MsgPack.Serialization
 		}
 
 		[Test]
-		public void TestDateTimeOffsetNative()
+		public void TestDateTimeOffsetClassic0_9()
 		{
 			TestCore(
-				DateTimeOffset.Now,
+				DateTimeOffset.Now, // Use now because Native mode should serialize its kind
 				stream => 
 					{
 						var array = Unpacking.UnpackArray( stream );
@@ -311,7 +339,7 @@ namespace MsgPack.Serialization
 		}
 
 		[Test]
-		public void TestDateTimeClassic()
+		public void TestDateTimeClassic0_5()
 		{
 			TestCore(
 				DateTime.UtcNow,
@@ -325,7 +353,7 @@ namespace MsgPack.Serialization
 		}
 
 		[Test]
-		public void TestDateTimeOffsetClassic()
+		public void TestDateTimeOffsetClassic0_5()
 		{
 			TestCore(
 				DateTimeOffset.UtcNow,
@@ -1469,7 +1497,8 @@ namespace MsgPack.Serialization
 		[Test]
 		public void TestEmptyBytes()
 		{
-			var serializer = this.CreateTarget<byte[]>( GetSerializationContext() );
+			var context = NewSerializationContext( SerializationCompatibilityLevel.Latest );
+			var serializer = this.CreateTarget<byte[]>( context );
 			using ( var stream = new MemoryStream() )
 			{
 				serializer.Pack( stream, new byte[ 0 ] );
@@ -1480,14 +1509,28 @@ namespace MsgPack.Serialization
 		}
 
 		[Test]
-		public void TestEmptyBytes_Classic()
+		public void TestEmptyBytes_Classic0_5()
 		{
-			var context = NewSerializationContext( PackerCompatibilityOptions.Classic, DateTimeConversionMethod.Native );
+			var context = NewSerializationContext( SerializationCompatibilityLevel.Version0_5 );
 			var serializer = this.CreateTarget<byte[]>( context );
 			using ( var stream = new MemoryStream() )
 			{
 				serializer.Pack( stream, new byte[ 0 ] );
 				Assert.That( stream.Length, Is.EqualTo( 1 ), BitConverter.ToString( stream.ToArray() ) );
+				stream.Position = 0;
+				Assert.That( serializer.Unpack( stream ), Is.EqualTo( new byte[ 0 ] ) );
+			}
+		}
+
+		[Test]
+		public void TestEmptyBytes_Classic0_9()
+		{
+			var context = NewSerializationContext( SerializationCompatibilityLevel.Version0_9 );
+			var serializer = this.CreateTarget<byte[]>( context );
+			using ( var stream = new MemoryStream() )
+			{
+				serializer.Pack( stream, new byte[ 0 ] );
+				Assert.That( stream.Length, Is.EqualTo( 2 ), BitConverter.ToString( stream.ToArray() ) );
 				stream.Position = 0;
 				Assert.That( serializer.Unpack( stream ), Is.EqualTo( new byte[ 0 ] ) );
 			}
@@ -4457,10 +4500,10 @@ namespace MsgPack.Serialization
 #endif // FEATURE_TAP
 
 		[Test]
-		public void TestBinary_ClassicContext()
+		public void TestBinary_ClassicContext0_5()
 		{
-			var context = NewSerializationContext( PackerCompatibilityOptions.Classic, DateTimeConversionMethod.Native );
-			var serializer = context.GetSerializer<byte[]>();
+			var context = NewSerializationContext( SerializationCompatibilityLevel.Version0_5 );
+			var serializer = CreateTarget<byte[]>( context );
 
 			using ( var stream = new MemoryStream() )
 			{
@@ -4470,9 +4513,36 @@ namespace MsgPack.Serialization
 		}
 
 		[Test]
+		public void TestBinary_ClassicContext0_9()
+		{
+			var context = NewSerializationContext( SerializationCompatibilityLevel.Version0_9 );
+			var serializer = CreateTarget<byte[]>( context );
+
+			using ( var stream = new MemoryStream() )
+			{
+				serializer.Pack( stream, new byte[] { 1 } );
+				Assert.That( stream.ToArray(), Is.EqualTo( new byte[] { MessagePackCode.Bin8, 1, 1 } ) );;
+			}
+		}
+
+		[Test]
+		public void TestBinary_DefaultContext()
+		{
+			var context = NewSerializationContext( SerializationCompatibilityLevel.Latest );
+			var serializer = CreateTarget<byte[]>( context );
+
+			using ( var stream = new MemoryStream() )
+			{
+				serializer.Pack( stream, new byte[] { 1 } );
+				Assert.That( stream.ToArray(), Is.EqualTo( new byte[] { MessagePackCode.Bin8, 1, 1 } ) );
+			}
+		}
+
+		[Test]
 		public void TestBinary_ContextWithPackerCompatilibyOptionsNone()
 		{
-			var context = NewSerializationContext( PackerCompatibilityOptions.None, DateTimeConversionMethod.Timestamp );
+			var context = NewSerializationContext( SerializationCompatibilityLevel.Version0_5 );
+			context.CompatibilityOptions.PackerCompatibilityOptions = PackerCompatibilityOptions.None;
 			var serializer = CreateTarget<byte[]>( context );
 
 			using ( var stream = new MemoryStream() )
@@ -4482,10 +4552,27 @@ namespace MsgPack.Serialization
 			}
 		}
 		[Test]
-		public void TestExt_ClassicContext()
+		public void TestExt_ClassicContext0_5()
 		{
-			var context = NewSerializationContext( SerializationContext.CreateClassicContext().CompatibilityOptions.PackerCompatibilityOptions, SerializationContext.CreateClassicContext().DefaultDateTimeConversionMethod );
+			var context = NewSerializationContext( SerializationCompatibilityLevel.Version0_5 );
 			context.Serializers.RegisterOverride( new CustomDateTimeSerealizer() );
+			var serializer = CreateTarget<DateTime>( context );
+
+			using ( var stream = new MemoryStream() )
+			{
+				var date = DateTime.UtcNow;
+				serializer.Pack( stream, date );
+				stream.Position = 0;
+				var unpacked = serializer.Unpack( stream );
+				Assert.That( unpacked.ToString( "yyyyMMddHHmmssfff" ), Is.EqualTo( date.ToString( "yyyyMMddHHmmssfff" ) ) );
+			}
+		}
+
+		[Test]
+		public void TestExt_ClassicContext0_9()
+		{
+			var context = NewSerializationContext( SerializationCompatibilityLevel.Version0_9 );
+			context.Serializers.Register( new CustomDateTimeSerealizer() );
 			var serializer = CreateTarget<DateTime>( context );
 
 			using ( var stream = new MemoryStream() )
@@ -4501,7 +4588,7 @@ namespace MsgPack.Serialization
 		[Test]
 		public void TestExt_DefaultContext()
 		{
-			var context = NewSerializationContext( SerializationContext.Default.CompatibilityOptions.PackerCompatibilityOptions, SerializationContext.Default.DefaultDateTimeConversionMethod );
+			var context = NewSerializationContext( SerializationCompatibilityLevel.Latest );
 			context.Serializers.Register( new CustomDateTimeSerealizer() );
 			var serializer = CreateTarget<DateTime>( context );
 
@@ -9076,9 +9163,9 @@ namespace MsgPack.Serialization
 		public void TestOmitNullEntryInDictionary()
 		{
 			var context = GetSerializationContext();
-			Assert.That( context.DictionarySerlaizationOptions.OmitNullEntry, Is.False, "default value" );
+			Assert.That( context.DictionarySerializationOptions.OmitNullEntry, Is.False, "default value" );
 			TestOmitNullEntryInDictionaryCore( context, true, false );
-			context.DictionarySerlaizationOptions.OmitNullEntry = true;
+			context.DictionarySerializationOptions.OmitNullEntry = true;
 			TestOmitNullEntryInDictionaryCore( context, false, false );
 		}
 
@@ -9088,9 +9175,9 @@ namespace MsgPack.Serialization
 		public void TestOmitNullEntryInDictionary_Async()
 		{
 			var context = GetSerializationContext();
-			Assert.That( context.DictionarySerlaizationOptions.OmitNullEntry, Is.False, "default value" );
+			Assert.That( context.DictionarySerializationOptions.OmitNullEntry, Is.False, "default value" );
 			TestOmitNullEntryInDictionaryCore( context, true, true );
-			context.DictionarySerlaizationOptions.OmitNullEntry = true;
+			context.DictionarySerializationOptions.OmitNullEntry = true;
 			TestOmitNullEntryInDictionaryCore( context, false, true );
 		}
 
@@ -9103,7 +9190,7 @@ namespace MsgPack.Serialization
 			try
 			{
 				var context = GetSerializationContext();
-				context.DictionarySerlaizationOptions.OmitNullEntry = true;
+				context.DictionarySerializationOptions.OmitNullEntry = true;
 				TestOmitNullEntryInDictionaryCore( context, true, false );
 			}
 			finally
@@ -9121,7 +9208,7 @@ namespace MsgPack.Serialization
 			try
 			{
 				var context = GetSerializationContext();
-				context.DictionarySerlaizationOptions.OmitNullEntry = true;
+				context.DictionarySerializationOptions.OmitNullEntry = true;
 				TestOmitNullEntryInDictionaryCore( context, true, true );
 			}
 			finally
@@ -9195,7 +9282,7 @@ namespace MsgPack.Serialization
 		public void TestDictionaryKeyTransformer_Default_AsIs()
 		{
 			var context = GetSerializationContext();
-			Assert.That( context.DictionarySerlaizationOptions.KeyTransformer, Is.Null, "default value" );
+			Assert.That( context.DictionarySerializationOptions.KeyTransformer, Is.Null, "default value" );
 			TestDictionaryKeyCore( context, "FirstProperty", "SecondProperty", "ThirdProperty", "FourthProperty", asIs: true, isAsync: false );
 		}
 
@@ -9205,7 +9292,7 @@ namespace MsgPack.Serialization
 		public void TestDictionaryKeyTransformer_Default_AsIs_Async()
 		{
 			var context = GetSerializationContext();
-			Assert.That( context.DictionarySerlaizationOptions.KeyTransformer, Is.Null, "default value" );
+			Assert.That( context.DictionarySerializationOptions.KeyTransformer, Is.Null, "default value" );
 			TestDictionaryKeyCore( context, "FirstProperty", "SecondProperty", "ThirdProperty", "FourthProperty", asIs: true, isAsync: true );
 		}
 
@@ -9215,7 +9302,7 @@ namespace MsgPack.Serialization
 		public void TestDictionaryKeyTransformer_LowerCamel()
 		{
 			var context = GetSerializationContext();
-			context.DictionarySerlaizationOptions.KeyTransformer = DictionaryKeyTransformers.LowerCamel;
+			context.DictionarySerializationOptions.KeyTransformer = DictionaryKeyTransformers.LowerCamel;
 			TestDictionaryKeyCore( context, "firstProperty", "secondProperty", "thirdProperty", "fourthProperty", asIs: false, isAsync: false );
 		}
 
@@ -9225,7 +9312,7 @@ namespace MsgPack.Serialization
 		public void TestDictionaryKeyTransformer_LowerCamel_Async()
 		{
 			var context = GetSerializationContext();
-			context.DictionarySerlaizationOptions.KeyTransformer = DictionaryKeyTransformers.LowerCamel;
+			context.DictionarySerializationOptions.KeyTransformer = DictionaryKeyTransformers.LowerCamel;
 			TestDictionaryKeyCore( context, "firstProperty", "secondProperty", "thirdProperty", "fourthProperty", asIs: false, isAsync: true );
 		}
 
@@ -9235,7 +9322,7 @@ namespace MsgPack.Serialization
 		public void TestDictionaryKeyTransformer_Custom()
 		{
 			var context = GetSerializationContext();
-			context.DictionarySerlaizationOptions.KeyTransformer = 
+			context.DictionarySerializationOptions.KeyTransformer = 
 				key => Regex.Replace( key, "[A-Z]", match => match.Index == 0 ? match.Value.ToLower() : "-" + match.Value.ToLower() );
 			TestDictionaryKeyCore( context, "first-property", "second-property", "third-property", "fourth-property", asIs: false, isAsync: false );
 		}
@@ -9246,7 +9333,7 @@ namespace MsgPack.Serialization
 		public void TestDictionaryKeyTransformer_Custom_Async()
 		{
 			var context = GetSerializationContext();
-			context.DictionarySerlaizationOptions.KeyTransformer = 
+			context.DictionarySerializationOptions.KeyTransformer = 
 				key => Regex.Replace( key, "[A-Z]", match => match.Index == 0 ? match.Value.ToLower() : "-" + match.Value.ToLower() );
 			TestDictionaryKeyCore( context, "first-property", "second-property", "third-property", "fourth-property", asIs: false, isAsync: true );
 		}
@@ -21466,7 +21553,7 @@ namespace MsgPack.Serialization
 			this.TestCoreWithAutoVerify( default( Version[] ), GetSerializationContext() );
 		}	
 		
-#if !SILVERLIGHT
+#if !SILVERLIGHT && !UNITY
 		[Test]
 		public void TestFILETIMEField()
 		{
@@ -21479,7 +21566,7 @@ namespace MsgPack.Serialization
 			this.TestCoreWithAutoVerify( Enumerable.Repeat( ToFileTime( DateTime.UtcNow ), 2 ).ToArray(), GetSerializationContext() );
 		}
 		
-#endif // !SILVERLIGHT
+#endif // !SILVERLIGHT && !UNITY
 		[Test]
 		public void TestTimeSpanField()
 		{
@@ -22883,7 +22970,7 @@ namespace MsgPack.Serialization
 			}
 		}	
 
-#if !SILVERLIGHT
+#if !SILVERLIGHT && !UNITY
 
 		private static FILETIME ToFileTime( DateTime dateTime )
 		{
@@ -22891,6 +22978,6 @@ namespace MsgPack.Serialization
 			return new FILETIME(){ dwHighDateTime = unchecked( ( int )( fileTime >> 32 ) ), dwLowDateTime = unchecked( ( int )( fileTime & 0xffffffff ) ) };
 		}
 
-#endif // !SILVERLIGHT
+#endif // !SILVERLIGHT && !UNITY
 	}
 }
